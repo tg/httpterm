@@ -216,3 +216,32 @@ func TestSecondRequestTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNoNewIdle(t *testing.T) {
+	t.Parallel()
+
+	readTimeout := time.Second
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	go func() {
+		s := NewServer(&http.Server{ReadTimeout: readTimeout})
+		s.IdleTimeout = readTimeout * 2
+		s.NoNewIdle = true
+		s.Serve(l)
+	}()
+
+	c, err := net.Dial(l.Addr().Network(), l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if err = checkTimeout(c, readTimeout); err != nil {
+		t.Fatal(err)
+	}
+}

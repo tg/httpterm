@@ -13,6 +13,12 @@ type Server struct {
 	// will be used as a single request read timeout.
 	IdleTimeout time.Duration
 
+	// NoNewIdle controls whether new connection can be idle before issuing
+	// a request. By default new connections will have IdleTimeout allowing for
+	// idle period before issuing a request. However, if this flag is set, new
+	// connections will be given ReadTimeout as the request was already initiated.
+	NoNewIdle bool
+
 	server   *http.Server // wrapped http server
 	listener net.Listener
 }
@@ -25,24 +31,25 @@ func NewServer(server *http.Server) *Server {
 // Serve behaves as http.Server.Serve on the wrapped server instance
 func (s *Server) Serve(l net.Listener) error {
 	if s.IdleTimeout != 0 {
-		// Wrap with custom listener
-		l = &rtListener{l, s.server.ReadTimeout}
+		reqTimeout := s.server.ReadTimeout
 
-		// Set server.ReadTimeout to IdleTimeout, as http.Server uses this
-		// after going into idle state, when awaiting new request.
-		s.server.ReadTimeout = s.IdleTimeout
+		// Disable read timeout managment by http.Server
+		s.server.ReadTimeout = 0
+
+		// Wrap with custom listener
+		l = &rtListener{l, reqTimeout, s.IdleTimeout, s.NoNewIdle}
 
 		oldConnState := s.server.ConnState
-		s.server.ConnState = func(c net.Conn, s http.ConnState) {
-			switch s {
+		s.server.ConnState = func(c net.Conn, state http.ConnState) {
+			switch state {
 			case http.StateIdle:
 				if c, ok := c.(*rtConn); ok {
-					c.idle()
+					c.setIdle()
 				}
 			}
 			// Pass to custom handler
 			if oldConnState != nil {
-				oldConnState(c, s)
+				oldConnState(c, state)
 			}
 		}
 	}
@@ -52,33 +59,54 @@ func (s *Server) Serve(l net.Listener) error {
 
 type rtListener struct {
 	net.Listener
-	timeout time.Duration // timeout for processing a single request
+
+	reqTimeout  time.Duration // timeout for processing a single request
+	idleTimeout time.Duration // idle timeout
+	newAsReq    bool          // set new connections to reqTimeout
 }
 
 func (l *rtListener) Accept() (c net.Conn, err error) {
 	c, err = l.Listener.Accept()
-	return &rtConn{Conn: c, timeout: l.timeout}, err
+	if c != nil {
+		c = newRtConn(c, l.reqTimeout, l.idleTimeout, l.newAsReq)
+	}
+	return
 }
 
-// conn is a net.Conn that resets read deadline at the beginning of every request
+// rtConn is a net.Conn that sets read deadlines for idle and active state.
+// It automatically detects requests as first bytes are read after idle state.
 type rtConn struct {
 	net.Conn
 
-	timeout time.Duration // timeout for processing a single request
-	active  bool          // are we currently processing a request?
+	reqTimeout  time.Duration // timeout for processing a single request
+	idleTimeout time.Duration // idle timeout
+	active      bool          // are we currently processing a request?
+}
+
+func newRtConn(c net.Conn, rto time.Duration, ito time.Duration, active bool) *rtConn {
+	rc := &rtConn{c, rto, ito, active}
+	if active {
+		rc.setActive()
+	} else {
+		rc.setIdle()
+	}
+	return rc
 }
 
 func (c *rtConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
 	if n > 0 && !c.active {
-		// First byte in the request, set the deadline
-		c.active = true
-		_ = c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
+		c.setActive()
 	}
 	return
 }
 
-// mark connection as idle, so next byte will be considered as a new request
-func (c *rtConn) idle() {
+func (c *rtConn) setActive() {
+	c.active = true
+	_ = c.Conn.SetReadDeadline(time.Now().Add(c.reqTimeout))
+}
+
+func (c *rtConn) setIdle() {
 	c.active = false
+	_ = c.Conn.SetReadDeadline(time.Now().Add(c.idleTimeout))
 }
