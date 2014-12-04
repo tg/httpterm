@@ -78,10 +78,9 @@ func (s *Server) Close() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	s.closing = true
-
 	s.listener.Close()
 	s.server.SetKeepAlivesEnabled(false)
+	s.closing = true
 
 	// Set a 100ms deadline for all inactive connections.
 	// If during this period state changes to active, request will be processed
