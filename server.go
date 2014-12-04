@@ -79,7 +79,21 @@ func (s *Server) Serve(l net.Listener) error {
 
 // Close server
 func (s *Server) Close() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	s.listener.Close()
+	s.server.SetKeepAlivesEnabled(false)
+
+	// Set a 100ms deadline for all incactive connections.
+	// We could normally just close the connection, but some of them might be
+	// processing headers, so we want to give some time to handle new request.
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for c, active := range s.conns {
+		if !active {
+			c.SetReadDeadline(deadline)
+		}
+	}
 }
 
 func (s *Server) updateConnMap(c net.Conn, state http.ConnState) {
