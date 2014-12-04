@@ -217,7 +217,7 @@ func TestSecondRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestNoNewIdle(t *testing.T) {
+func TestNewAsActive(t *testing.T) {
 	t.Parallel()
 
 	readTimeout := time.Second
@@ -231,7 +231,7 @@ func TestNoNewIdle(t *testing.T) {
 	go func() {
 		s := NewServer(&http.Server{ReadTimeout: readTimeout})
 		s.IdleTimeout = readTimeout * 2
-		s.NoNewIdle = true
+		s.NewAsActive = true
 		s.Serve(l)
 	}()
 
