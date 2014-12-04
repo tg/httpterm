@@ -24,10 +24,14 @@ type Server struct {
 	server   *http.Server // wrapped http server
 	listener net.Listener
 
+	reqTimeout time.Duration // request timeout
+
 	lock sync.Mutex
 
-	// conns is a map of connections which indicates whether connection is active.
-	// Connection is active when is processeing a request (after headers parsing).
+	closing bool
+
+	// conns is a map of connections which indicates whether connection is active,
+	// i.e. there a request being processed (including header handling)
 	conns map[net.Conn]bool
 }
 
@@ -38,35 +42,11 @@ func NewServer(server *http.Server) *Server {
 
 // Serve behaves as http.Server.Serve on the wrapped server instance
 func (s *Server) Serve(l net.Listener) error {
-	reqTimeout := s.server.ReadTimeout
+	s.reqTimeout = s.server.ReadTimeout
 
 	oldConnState := s.server.ConnState
 	newConnState := func(c net.Conn, state http.ConnState) {
-		s.updateConnMap(c, state)
-
-		var timeout time.Duration
-
-		switch state {
-		case http.StateNew:
-			if s.NewAsActive {
-				timeout = reqTimeout
-			} else {
-				timeout = s.IdleTimeout
-			}
-
-		case http.StateIdle:
-			timeout = s.IdleTimeout
-			if c, ok := c.(*rtConn); ok {
-				c.idle()
-			}
-		case StateData:
-			timeout = reqTimeout
-		}
-
-		if timeout != 0 {
-			c.SetReadDeadline(time.Now().Add(timeout))
-		}
-
+		s.updateConnState(c, state)
 		// Pass to original handler
 		if oldConnState != nil {
 			oldConnState(c, state)
@@ -99,12 +79,14 @@ func (s *Server) Close() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	s.closing = true
+
 	s.listener.Close()
 	s.server.SetKeepAlivesEnabled(false)
 
-	// Set a 100ms deadline for all incactive connections.
-	// We could normally just close the connection, but some of them might be
-	// processing headers, so we want to give some time to handle new request.
+	// Set a 100ms deadline for all inactive connections.
+	// If during this period state changes to active, request will be processed
+	// with regular request timeout, otherwise connection will be closed.
 	deadline := time.Now().Add(100 * time.Millisecond)
 	for c, active := range s.conns {
 		if !active {
@@ -113,17 +95,50 @@ func (s *Server) Close() {
 	}
 }
 
-func (s *Server) updateConnMap(c net.Conn, state http.ConnState) {
+func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
+	switch state {
+	case http.StateNew:
+		if s.NewAsActive {
+			timeout = s.reqTimeout
+		} else {
+			timeout = s.IdleTimeout
+		}
+
+	case http.StateIdle:
+		timeout = s.IdleTimeout
+
+	case StateData:
+		timeout = s.reqTimeout
+	}
+
+	return
+}
+
+func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	// Update connection map
 	switch state {
 	case http.StateNew, http.StateIdle:
 		s.conns[c] = false
 	case http.StateClosed, http.StateHijacked:
 		delete(s.conns, c)
-	case http.StateActive:
+	case StateData:
 		s.conns[c] = true
+	}
+
+	if state == http.StateIdle {
+		if c, ok := c.(*rtConn); ok {
+			c.idle()
+		}
+	}
+
+	// Update timeout if not closing or new request
+	if !s.closing || state == StateData {
+		if t := s.getTimeout(state); t != 0 {
+			c.SetReadDeadline(time.Now().Add(t))
+		}
 	}
 }
 
