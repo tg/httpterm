@@ -22,7 +22,7 @@ type Server struct {
 	NewAsActive bool
 
 	server   *http.Server // wrapped http server
-	listener net.Listener
+	listener *rtListener
 
 	reqTimeout time.Duration // request timeout
 
@@ -60,13 +60,13 @@ func (s *Server) Serve(l net.Listener) error {
 	s.server.ConnState = newConnState
 
 	// Wrap with custom listener
-	l = &rtListener{
+	s.listener = &rtListener{
 		Listener:    l,
 		newAsActive: s.NewAsActive,
 		callback:    func(c net.Conn) { newConnState(c, StateData) },
 	}
 
-	err := s.server.Serve(l)
+	err := s.server.Serve(s.listener)
 	if err == errListenerClosed {
 		err = nil
 	}
@@ -82,7 +82,7 @@ func (s *Server) Close() {
 	s.server.SetKeepAlivesEnabled(false)
 	s.closing = true
 
-	// Set a 100ms deadline for all inactive connections.
+	// Set a 100ms deadline for all inactive connections (new or idle).
 	// If during this period state changes to active, request will be processed
 	// with regular request timeout, otherwise connection will be closed.
 	deadline := time.Now().Add(100 * time.Millisecond)
@@ -122,6 +122,7 @@ func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 		s.conns[c] = false
 	case http.StateClosed, http.StateHijacked:
 		delete(s.conns, c)
+		s.listener.wg.Done()
 	case StateData:
 		s.conns[c] = true
 	}
@@ -146,6 +147,7 @@ type rtListener struct {
 	newAsActive bool             // set new connections as active
 	callback    func(c net.Conn) // data callback
 
+	wg     sync.WaitGroup
 	mx     sync.Mutex
 	closed bool
 }
@@ -154,9 +156,16 @@ type rtListener struct {
 var errListenerClosed = errors.New("listener closed")
 
 func (l *rtListener) Accept() (c net.Conn, err error) {
+	l.wg.Add(1)
+	defer func() {
+		if c == nil {
+			l.wg.Done()
+		}
+	}()
+
 	c, err = l.Listener.Accept()
 	if c != nil {
-		c = &rtConn{c, l.newAsActive, l.callback}
+		c = &rtConn{c, l.newAsActive, l.callback, &l.wg}
 	}
 	if err != nil {
 		l.mx.Lock()
@@ -189,6 +198,7 @@ type rtConn struct {
 
 	active   bool             // are we currently processing a request?
 	callback func(c net.Conn) // data callback
+	wg       *sync.WaitGroup
 }
 
 func (c *rtConn) Read(b []byte) (n int, err error) {
