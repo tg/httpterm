@@ -3,6 +3,7 @@ package httpow
 import (
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -21,11 +22,17 @@ type Server struct {
 
 	server   *http.Server // wrapped http server
 	listener net.Listener
+
+	lock sync.Mutex
+
+	// conns is a map of connections which indicates whether connection is active.
+	// Connection is active when is processeing a request (after headers parsing).
+	conns map[net.Conn]bool
 }
 
 // NewServer wraps http.Server, which should be already configured.
 func NewServer(server *http.Server) *Server {
-	return &Server{server: server}
+	return &Server{server: server, conns: make(map[net.Conn]bool)}
 }
 
 // Serve behaves as http.Server.Serve on the wrapped server instance
@@ -38,23 +45,40 @@ func (s *Server) Serve(l net.Listener) error {
 
 		// Wrap with custom listener
 		l = &rtListener{l, reqTimeout, s.IdleTimeout, s.NoNewIdle}
+	}
 
-		oldConnState := s.server.ConnState
-		s.server.ConnState = func(c net.Conn, state http.ConnState) {
-			switch state {
-			case http.StateIdle:
-				if c, ok := c.(*rtConn); ok {
-					c.setIdle()
-				}
+	// Add ConnState callback, but make sure the one provided by user is called as well
+	oldConnState := s.server.ConnState
+	s.server.ConnState = func(c net.Conn, state http.ConnState) {
+		s.updateConnMap(c, state)
+
+		if state == http.StateIdle {
+			if c, ok := c.(*rtConn); ok {
+				c.setIdle()
 			}
-			// Pass to custom handler
-			if oldConnState != nil {
-				oldConnState(c, state)
-			}
+		}
+
+		// Pass to original handler
+		if oldConnState != nil {
+			oldConnState(c, state)
 		}
 	}
 
 	return s.server.Serve(l)
+}
+
+func (s *Server) updateConnMap(c net.Conn, state http.ConnState) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	switch state {
+	case http.StateNew, http.StateIdle:
+		s.conns[c] = false
+	case http.StateClosed, http.StateHijacked:
+		delete(s.conns, c)
+	case http.StateActive:
+		s.conns[c] = true
+	}
 }
 
 type rtListener struct {
