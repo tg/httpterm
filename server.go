@@ -42,7 +42,11 @@ func NewServer(server *http.Server) *Server {
 
 // Serve behaves as http.Server.Serve on the wrapped server instance
 func (s *Server) Serve(l net.Listener) error {
-	s.reqTimeout = s.server.ReadTimeout
+	if s.IdleTimeout != 0 {
+		s.reqTimeout = s.server.ReadTimeout
+		// Disable read timeout management by http.Server
+		s.server.ReadTimeout = 0
+	}
 
 	oldConnState := s.server.ConnState
 	newConnState := func(c net.Conn, state http.ConnState) {
@@ -55,16 +59,11 @@ func (s *Server) Serve(l net.Listener) error {
 
 	s.server.ConnState = newConnState
 
-	if s.IdleTimeout != 0 {
-		// Disable read timeout managment by http.Server
-		s.server.ReadTimeout = 0
-
-		// Wrap with custom listener
-		l = &rtListener{
-			Listener:    l,
-			newAsActive: s.NewAsActive,
-			callback:    newConnState,
-		}
+	// Wrap with custom listener
+	l = &rtListener{
+		Listener:    l,
+		newAsActive: s.NewAsActive,
+		callback:    func(c net.Conn) { newConnState(c, StateData) },
 	}
 
 	err := s.server.Serve(l)
@@ -145,8 +144,8 @@ func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 type rtListener struct {
 	net.Listener
 
-	newAsActive bool // set new connections as active
-	callback    func(c net.Conn, s http.ConnState)
+	newAsActive bool             // set new connections as active
+	callback    func(c net.Conn) // data callback
 
 	mx     sync.Mutex
 	closed bool
@@ -189,14 +188,14 @@ const (
 type rtConn struct {
 	net.Conn
 
-	active   bool // are we currently processing a request?
-	callback func(c net.Conn, s http.ConnState)
+	active   bool             // are we currently processing a request?
+	callback func(c net.Conn) // data callback
 }
 
 func (c *rtConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
 	if n > 0 && !c.active {
-		c.callback(c, StateData)
+		c.callback(c)
 	}
 	return
 }
