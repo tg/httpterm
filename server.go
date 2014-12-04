@@ -1,6 +1,7 @@
 package httpow
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"sync"
@@ -44,7 +45,12 @@ func (s *Server) Serve(l net.Listener) error {
 		s.server.ReadTimeout = 0
 
 		// Wrap with custom listener
-		l = &rtListener{l, reqTimeout, s.IdleTimeout, s.NoNewIdle}
+		l = &rtListener{
+			Listener:    l,
+			reqTimeout:  reqTimeout,
+			idleTimeout: s.IdleTimeout,
+			newAsReq:    s.NoNewIdle,
+		}
 	}
 
 	// Add ConnState callback, but make sure the one provided by user is called as well
@@ -64,7 +70,16 @@ func (s *Server) Serve(l net.Listener) error {
 		}
 	}
 
-	return s.server.Serve(l)
+	err := s.server.Serve(l)
+	if err == errListenerClosed {
+		err = nil
+	}
+	return err
+}
+
+// Close server
+func (s *Server) Close() {
+	s.listener.Close()
 }
 
 func (s *Server) updateConnMap(c net.Conn, state http.ConnState) {
@@ -87,14 +102,34 @@ type rtListener struct {
 	reqTimeout  time.Duration // timeout for processing a single request
 	idleTimeout time.Duration // idle timeout
 	newAsReq    bool          // set new connections to reqTimeout
+
+	mx     sync.Mutex
+	closed bool
 }
+
+// This error will be proagated to Serve when we delibaretely close the listener
+var errListenerClosed = errors.New("listener closed")
 
 func (l *rtListener) Accept() (c net.Conn, err error) {
 	c, err = l.Listener.Accept()
 	if c != nil {
 		c = newRtConn(c, l.reqTimeout, l.idleTimeout, l.newAsReq)
 	}
+	if err != nil {
+		l.mx.Lock()
+		if l.closed {
+			err = errListenerClosed
+		}
+		l.mx.Unlock()
+	}
 	return
+}
+
+func (l *rtListener) Close() (err error) {
+	l.mx.Lock()
+	l.closed = true
+	l.mx.Unlock()
+	return l.Listener.Close()
 }
 
 // rtConn is a net.Conn that sets read deadlines for idle and active state.
