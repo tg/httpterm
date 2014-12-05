@@ -245,3 +245,119 @@ func TestNewAsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClose_empty(t *testing.T) {
+	s := NewServer(&http.Server{Addr: "127.0.0.1:0"})
+
+	done := make(chan bool)
+
+	go func() {
+		pending, err := s.ListenAndServe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-pending
+		done <- true
+	}()
+
+	time.Sleep(time.Second)
+	s.Close()
+	<-done
+}
+
+func TestClose_idle(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	done := make(chan bool)
+
+	s := NewServer(&http.Server{})
+	s.IdleTimeout = 5 * time.Second
+
+	go func() {
+		pending, err := s.Serve(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-pending
+		done <- true
+	}()
+
+	c, err := net.Dial(l.Addr().Network(), l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	s.Close()
+	<-done
+}
+
+func TestClose_active(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	done := make(chan bool)
+
+	s := NewServer(&http.Server{ReadTimeout: time.Second})
+	s.IdleTimeout = 5 * time.Second
+
+	go func() {
+		pending, err := s.Serve(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-pending
+		done <- true
+	}()
+
+	c, err := net.Dial(l.Addr().Network(), l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.Write([]byte("GET"))
+	s.Close()
+
+	<-done
+}
+
+func TestClose_activeAfterClose(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	done := make(chan bool)
+
+	s := NewServer(&http.Server{ReadTimeout: time.Second})
+	s.IdleTimeout = 5 * time.Second
+
+	go func() {
+		pending, err := s.Serve(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-pending
+		done <- true
+	}()
+
+	c, err := net.Dial(l.Addr().Network(), l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	s.Close()
+	c.Write([]byte("GET"))
+
+	<-done
+}
