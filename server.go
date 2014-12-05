@@ -41,7 +41,7 @@ func NewServer(server *http.Server) *Server {
 }
 
 // Serve behaves as http.Server.Serve on the wrapped server instance
-func (s *Server) Serve(l net.Listener) error {
+func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 	if s.IdleTimeout != 0 {
 		s.reqTimeout = s.server.ReadTimeout
 		// Disable read timeout management by http.Server
@@ -66,11 +66,20 @@ func (s *Server) Serve(l net.Listener) error {
 		callback:    func(c net.Conn) { newConnState(c, StateData) },
 	}
 
-	err := s.server.Serve(s.listener)
+	err = s.server.Serve(s.listener)
 	if err == errListenerClosed {
 		err = nil
 	}
-	return err
+
+	// Wait for pending requests
+	waiter := make(chan bool)
+	pending = waiter
+	go func() {
+		s.listener.wg.Wait()
+		close(waiter)
+	}()
+
+	return
 }
 
 // Close server
