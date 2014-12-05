@@ -82,6 +82,21 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 	return
 }
 
+// ListenAndServe listens on the TCP network address from passed http.Server.Addr
+// and calls Serve(). Returned channel can be used to wait for pending requests
+// and will be closed once everything is handled.
+func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
+	addr := s.server.Addr
+	if addr == "" {
+		addr = ":http"
+	}
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return s.Serve(l)
+}
+
 // Close server
 func (s *Server) Close() {
 	s.lock.Lock()
