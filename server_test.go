@@ -84,8 +84,9 @@ func TestNewConnectionIdleTimeout(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{ReadTimeout: idleTimeout / 100})
+		s := NewServer(&http.Server{})
 		s.IdleTimeout = idleTimeout
+		s.ReqReadTimeout = idleTimeout / 100
 		s.Serve(l)
 	}()
 
@@ -112,8 +113,9 @@ func TestNewConnectionRequestTimeout(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{ReadTimeout: requestTimeout})
+		s := NewServer(&http.Server{})
 		s.IdleTimeout = requestTimeout * 2
+		s.ReqReadTimeout = requestTimeout
 		s.Serve(l)
 	}()
 
@@ -147,8 +149,9 @@ func TestIdleTimeoutAfterRequest(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{ReadTimeout: readTimeout})
+		s := NewServer(&http.Server{})
 		s.IdleTimeout = idleTimeout
+		s.ReqReadTimeout = readTimeout
 		s.Serve(l)
 	}()
 
@@ -187,8 +190,9 @@ func TestSecondRequestTimeout(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{ReadTimeout: readTimeout})
+		s := NewServer(&http.Server{})
 		s.IdleTimeout = idleTimeout
+		s.ReqReadTimeout = readTimeout
 		s.Serve(l)
 	}()
 
@@ -229,8 +233,9 @@ func TestNewAsActive(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{ReadTimeout: readTimeout})
+		s := NewServer(&http.Server{})
 		s.IdleTimeout = readTimeout * 2
+		s.ReqReadTimeout = readTimeout
 		s.NewAsActive = true
 		s.Serve(l)
 	}()

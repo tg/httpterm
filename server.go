@@ -10,9 +10,10 @@ import (
 
 // Server traps http.Server, exposes additional fuctionality
 type Server struct {
-	// IdleTimeout tells how long connection can be idle between requests.
-	// Value of http.Server.ReadTimeout taken from the passed server instance
-	// will be used as a single request read timeout.
+	// ReqReadTimeout defines timeout for reading the whole request (headers + body).
+	ReqReadTimeout time.Duration
+
+	// IdleTimeout defines for how long connection can be idle between requests.
 	IdleTimeout time.Duration
 
 	// NewAsActive controls whether new connection can be idle before issuing
@@ -24,10 +25,7 @@ type Server struct {
 	server   *http.Server // wrapped http server
 	listener *rtListener
 
-	reqTimeout time.Duration // request timeout
-
-	lock sync.Mutex
-
+	lock    sync.Mutex
 	closing bool
 
 	// conns is a map of connections which indicates whether connection is active,
@@ -42,12 +40,6 @@ func NewServer(server *http.Server) *Server {
 
 // Serve behaves as http.Server.Serve on the wrapped server instance
 func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
-	if s.IdleTimeout != 0 {
-		s.reqTimeout = s.server.ReadTimeout
-		// Disable read timeout management by http.Server
-		s.server.ReadTimeout = 0
-	}
-
 	oldConnState := s.server.ConnState
 	newConnState := func(c net.Conn, state http.ConnState) {
 		s.updateConnState(c, state)
@@ -118,19 +110,20 @@ func (s *Server) Close() {
 }
 
 func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
-	switch state {
-	case http.StateNew:
+	if state == http.StateNew {
 		if s.NewAsActive {
-			timeout = s.reqTimeout
+			state = StateData
 		} else {
-			timeout = s.IdleTimeout
+			state = http.StateIdle
 		}
+	}
 
+	switch state {
 	case http.StateIdle:
 		timeout = s.IdleTimeout
 
 	case StateData:
-		timeout = s.reqTimeout
+		timeout = s.ReqReadTimeout
 	}
 
 	return
