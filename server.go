@@ -182,7 +182,7 @@ func (l *rtListener) Accept() (c net.Conn, err error) {
 
 	c, err = l.Listener.Accept()
 	if c != nil {
-		c = &rtConn{c, l.newAsActive, l.callback, &l.wg}
+		c = &rtConn{c, l.newAsActive, l.callback}
 	}
 	if err != nil {
 		l.mx.Lock()
@@ -215,7 +215,6 @@ type rtConn struct {
 
 	active   bool             // are we currently processing a request?
 	callback func(c net.Conn) // data callback
-	wg       *sync.WaitGroup
 }
 
 func (c *rtConn) Read(b []byte) (n int, err error) {
