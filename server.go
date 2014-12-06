@@ -1,3 +1,4 @@
+// Package httpterm provides closable http.Server with extended read timeouts.
 package httpterm
 
 import (
