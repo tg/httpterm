@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+func assertTimeout(elapsed, expected time.Duration) error {
+	if math.Abs(float64(elapsed-expected)) > float64(100*time.Millisecond) {
+		return fmt.Errorf("timeout duration out of range: %s (expected %s)", elapsed, expected)
+	}
+	return nil
+}
+
 func checkTimeout(c net.Conn, timeout time.Duration) error {
 	// Measure read timeout
 	start := time.Now()
@@ -26,14 +33,10 @@ func checkTimeout(c net.Conn, timeout time.Duration) error {
 		return fmt.Errorf("received unexpected data: %s", data)
 	}
 
-	if math.Abs(float64(duration-timeout)) > float64(100*time.Millisecond) {
-		return fmt.Errorf("timeout duration out of range: %s", duration)
-	}
-
-	return nil
+	return assertTimeout(duration, timeout)
 }
 
-func checkRequestTimeout(c net.Conn, timeout time.Duration) error {
+func checkTimeoutGET(c net.Conn, timeout time.Duration) error {
 	c.SetWriteDeadline(time.Now().Add(timeout + time.Second))
 
 	_, err := c.Write([]byte("GET /index.html HTTP/1.1"))
@@ -86,7 +89,7 @@ func TestNewConnectionIdleTimeout(t *testing.T) {
 	go func() {
 		s := NewServer(&http.Server{})
 		s.IdleTimeout = idleTimeout
-		s.ReqReadTimeout = idleTimeout / 100
+		s.HeadReadTimeout = idleTimeout / 100
 		s.Serve(l)
 	}()
 
@@ -115,7 +118,7 @@ func TestNewConnectionRequestTimeout(t *testing.T) {
 	go func() {
 		s := NewServer(&http.Server{})
 		s.IdleTimeout = requestTimeout * 2
-		s.ReqReadTimeout = requestTimeout
+		s.HeadReadTimeout = requestTimeout
 		s.Serve(l)
 	}()
 
@@ -131,7 +134,52 @@ func TestNewConnectionRequestTimeout(t *testing.T) {
 	// Force read/write to return in case server is broken
 	c.SetDeadline(start.Add(requestTimeout + time.Second))
 
-	if err = checkRequestTimeout(c, requestTimeout); err != nil {
+	if err = checkTimeoutGET(c, requestTimeout); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewConnectionBodyTimeout(t *testing.T) {
+	t.Parallel()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	bodyread := make(chan time.Duration)
+
+	handler := http.NewServeMux()
+	handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ioutil.ReadAll(r.Body)
+		bodyread <- time.Since(start)
+	})
+
+	s := NewServer(&http.Server{Handler: handler})
+	s.BodyReadTimeout = time.Second
+	go func() {
+		s.Serve(l)
+	}()
+	defer s.Close()
+
+	c, err := net.Dial(l.Addr().Network(), l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	c.SetWriteDeadline(time.Now().Add(time.Second))
+
+	// Send all headers, but incomplete data
+	_, err = c.Write([]byte("POST /index.html HTTP/1.1\nContent-Length: 16\n\ndata"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	elapsed := <-bodyread
+	if err = assertTimeout(elapsed, s.BodyReadTimeout); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -151,7 +199,7 @@ func TestIdleTimeoutAfterRequest(t *testing.T) {
 	go func() {
 		s := NewServer(&http.Server{})
 		s.IdleTimeout = idleTimeout
-		s.ReqReadTimeout = readTimeout
+		s.HeadReadTimeout = readTimeout
 		s.Serve(l)
 	}()
 
@@ -192,7 +240,7 @@ func TestSecondRequestTimeout(t *testing.T) {
 	go func() {
 		s := NewServer(&http.Server{})
 		s.IdleTimeout = idleTimeout
-		s.ReqReadTimeout = readTimeout
+		s.HeadReadTimeout = readTimeout
 		s.Serve(l)
 	}()
 
@@ -216,7 +264,7 @@ func TestSecondRequestTimeout(t *testing.T) {
 	// Sleep through idle time
 	time.Sleep(idleTimeout - idleTimeout/10)
 
-	if err = checkRequestTimeout(c, readTimeout); err != nil {
+	if err = checkTimeoutGET(c, readTimeout); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -235,7 +283,7 @@ func TestNewAsActive(t *testing.T) {
 	go func() {
 		s := NewServer(&http.Server{})
 		s.IdleTimeout = readTimeout * 2
-		s.ReqReadTimeout = readTimeout
+		s.HeadReadTimeout = readTimeout
 		s.NewAsActive = true
 		s.Serve(l)
 	}()

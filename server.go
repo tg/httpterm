@@ -10,16 +10,21 @@ import (
 
 // Server traps http.Server, exposes additional fuctionality
 type Server struct {
-	// ReqReadTimeout defines timeout for reading the whole request (headers + body).
-	ReqReadTimeout time.Duration
+	// HeadReadTimeout defines timeout for reading request headers.
+	HeadReadTimeout time.Duration
+
+	// BodyReadTimeout defines timeout for reading request body.
+	// This timeout is being applied just before calling the request handler.
+	BodyReadTimeout time.Duration
 
 	// IdleTimeout defines for how long connection can be idle between requests.
 	IdleTimeout time.Duration
 
 	// NewAsActive controls whether new connection can be idle before issuing
-	// a request. By default new connections will have IdleTimeout allowing for
+	// a request. By default, new connections will have IdleTimeout allowing for
 	// idle period before issuing a request. However, if this flag is set, new
-	// connections will be given ReadTimeout as the request was already initiated.
+	// connections will be treated as immediately expecting the request, thus
+	// HeadReadTimeout will be applied.
 	NewAsActive bool
 
 	server   *http.Server // wrapped http server
@@ -110,6 +115,7 @@ func (s *Server) Close() {
 }
 
 func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
+	// Update state for new connection according to policy
 	if state == http.StateNew {
 		if s.NewAsActive {
 			state = StateData
@@ -123,7 +129,10 @@ func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
 		timeout = s.IdleTimeout
 
 	case StateData:
-		timeout = s.ReqReadTimeout
+		timeout = s.HeadReadTimeout
+
+	case http.StateActive:
+		timeout = s.BodyReadTimeout
 	}
 
 	return
@@ -151,7 +160,7 @@ func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 	}
 
 	// Update timeout if not closing or new request
-	if !s.closing || state == StateData {
+	if !s.closing || state == StateData || state == http.StateActive {
 		if t := s.getTimeout(state); t != 0 {
 			c.SetReadDeadline(time.Now().Add(t))
 		}
