@@ -1,7 +1,6 @@
-http, ow? *POW!*
-======
+# httpterm
 
-Extension to Go http.Server allowing for:
+Extension to Go `http.Server` allowing for:
 
 - Graceful shutdown
 - Fine-tuning read timeouts

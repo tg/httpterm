@@ -1,4 +1,4 @@
-package httpow
+package httpterm
 
 import (
 	"errors"
