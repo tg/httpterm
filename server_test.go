@@ -69,7 +69,7 @@ func httpGet(c net.Conn) (data []byte, err error) {
 
 	data = rawresp.Bytes()
 	if len(data) == 0 {
-		err = fmt.Errorf("No data from server")
+		err = fmt.Errorf("no data from server")
 	}
 
 	return
