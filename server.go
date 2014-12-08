@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+const (
+	// StateHead tells when initial request data (header) was received.
+	// This varies from http.StateActive, as the latter is issued after headers
+	// are parsed.
+	StateHead http.ConnState = 100 + iota
+)
+
 // ErrClosing indicating that operation is not allowed as server is closing
 var ErrClosing = errors.New("server closing")
 
@@ -71,7 +78,7 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 	s.listener = &rtListener{
 		Listener:    l,
 		newAsActive: s.NewAsActive,
-		callback:    func(c net.Conn) { newConnState(c, StateData) },
+		callback:    func(c net.Conn) { newConnState(c, StateHead) },
 	}
 
 	// Register signal handling for shutdown if requested
@@ -153,7 +160,7 @@ func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
 	// Update state for new connection according to policy
 	if state == http.StateNew {
 		if s.NewAsActive {
-			state = StateData
+			state = StateHead
 		} else {
 			state = http.StateIdle
 		}
@@ -163,7 +170,7 @@ func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
 	case http.StateIdle:
 		timeout = s.IdleTimeout
 
-	case StateData:
+	case StateHead:
 		timeout = s.HeadReadTimeout
 
 	case http.StateActive:
@@ -184,7 +191,7 @@ func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 	case http.StateClosed, http.StateHijacked:
 		delete(s.conns, c)
 		s.listener.wg.Done()
-	case StateData:
+	case StateHead:
 		s.conns[c] = true
 	}
 
@@ -195,7 +202,7 @@ func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 	}
 
 	// Update timeout if not closing or new request
-	if !s.closing || state == StateData || state == http.StateActive {
+	if !s.closing || state == StateHead || state == http.StateActive {
 		if t := s.getTimeout(state); t != 0 {
 			c.SetReadDeadline(time.Now().Add(t))
 		}
@@ -226,13 +233,6 @@ func (l *rtListener) Accept() (c net.Conn, err error) {
 
 	return
 }
-
-const (
-	// StateData tells when initial request data (header) was received.
-	// This varies from http.StateActive, as the latter is issued after headers
-	// are parsed.
-	StateData http.ConnState = 100 + iota
-)
 
 // rtConn is a net.Conn that sets read deadlines for idle and active state.
 // It automatically detects requests as first bytes are read after idle state.
