@@ -86,10 +86,13 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 
 	// Serve loop
 	err = s.server.Serve(s.listener)
-	// Clear error if server deliberately closed
-	if err == ErrClosing {
+
+	// Clear error if server closing
+	s.lock.Lock()
+	if s.closing {
 		err = nil
 	}
+	s.lock.Unlock()
 
 	// Wait for pending requests
 	waiter := make(chan bool)
@@ -205,9 +208,7 @@ type rtListener struct {
 	newAsActive bool             // set new connections as active
 	callback    func(c net.Conn) // data callback
 
-	wg     sync.WaitGroup
-	mx     sync.Mutex
-	closed bool
+	wg sync.WaitGroup
 }
 
 func (l *rtListener) Accept() (c net.Conn, err error) {
@@ -222,21 +223,8 @@ func (l *rtListener) Accept() (c net.Conn, err error) {
 	if c != nil {
 		c = &rtConn{c, l.newAsActive, l.callback}
 	}
-	if err != nil {
-		l.mx.Lock()
-		if l.closed {
-			err = ErrClosing
-		}
-		l.mx.Unlock()
-	}
-	return
-}
 
-func (l *rtListener) Close() (err error) {
-	l.mx.Lock()
-	l.closed = true
-	l.mx.Unlock()
-	return l.Listener.Close()
+	return
 }
 
 const (
