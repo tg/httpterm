@@ -113,12 +113,22 @@ func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
 	return s.Serve(l)
 }
 
+// ErrClosing indicating that operation is not allowed as server is closing
+var ErrClosing = errors.New("server closing")
+
 // Close server
-func (s *Server) Close() {
+func (s *Server) Close() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	s.listener.Close()
+	if s.closing {
+		return ErrClosing
+	}
+
+	if err := s.listener.Close(); err != nil {
+		return err
+	}
+
 	s.server.SetKeepAlivesEnabled(false)
 	s.closing = true
 
@@ -131,6 +141,8 @@ func (s *Server) Close() {
 			c.SetReadDeadline(deadline)
 		}
 	}
+
+	return nil
 }
 
 func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {

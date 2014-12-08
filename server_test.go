@@ -317,6 +317,11 @@ func TestClose_empty(t *testing.T) {
 	time.Sleep(time.Second)
 	s.Close()
 	<-done
+
+	err := s.Close()
+	if err != ErrClosing {
+		t.Fatal("Expected ErrClosing, got:", err)
+	}
 }
 
 func TestClose_idle(t *testing.T) {
