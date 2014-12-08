@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -411,6 +412,27 @@ func TestClose_activeAfterClose(t *testing.T) {
 
 	s.Close()
 	c.Write([]byte("GET"))
+
+	<-done
+}
+
+func TestClose_signal(t *testing.T) {
+	s := NewServer(&http.Server{Addr: "127.0.0.1:0"})
+	s.CloseOnSignal = true
+
+	done := make(chan bool)
+
+	go func() {
+		pending, err := s.ListenAndServe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-pending
+		done <- true
+	}()
+
+	time.Sleep(time.Second)
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 
 	<-done
 }

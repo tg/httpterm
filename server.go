@@ -5,7 +5,10 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -27,6 +30,10 @@ type Server struct {
 	// connections will be treated as immediately expecting the request, thus
 	// HeadReadTimeout will be applied.
 	NewAsActive bool
+
+	// CloseOnSignal enables server shutdown on SIGTERM/SIGNINT.
+	// Signal handler is registered in Serve() method.
+	CloseOnSignal bool
 
 	server   *http.Server // wrapped http server
 	listener *rtListener
@@ -64,6 +71,17 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 		callback:    func(c net.Conn) { newConnState(c, StateData) },
 	}
 
+	// Register signal handling for shutdown if requested
+	if s.CloseOnSignal {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-c
+			s.Close()
+		}()
+	}
+
+	// Serve loop
 	err = s.server.Serve(s.listener)
 	if err == errListenerClosed {
 		err = nil
