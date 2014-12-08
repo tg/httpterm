@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// ErrClosing indicating that operation is not allowed as server is closing
+var ErrClosing = errors.New("server closing")
+
 // Server traps http.Server, exposes additional fuctionality
 type Server struct {
 	// HeadReadTimeout defines timeout for reading request headers.
@@ -83,7 +86,8 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 
 	// Serve loop
 	err = s.server.Serve(s.listener)
-	if err == errListenerClosed {
+	// Clear error if server deliberately closed
+	if err == ErrClosing {
 		err = nil
 	}
 
@@ -112,9 +116,6 @@ func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
 	}
 	return s.Serve(l)
 }
-
-// ErrClosing indicating that operation is not allowed as server is closing
-var ErrClosing = errors.New("server closing")
 
 // Close server
 func (s *Server) Close() error {
@@ -209,9 +210,6 @@ type rtListener struct {
 	closed bool
 }
 
-// This error will be proagated to Serve when we delibaretely close the listener
-var errListenerClosed = errors.New("listener closed")
-
 func (l *rtListener) Accept() (c net.Conn, err error) {
 	l.wg.Add(1)
 	defer func() {
@@ -227,7 +225,7 @@ func (l *rtListener) Accept() (c net.Conn, err error) {
 	if err != nil {
 		l.mx.Lock()
 		if l.closed {
-			err = errListenerClosed
+			err = ErrClosing
 		}
 		l.mx.Unlock()
 	}
