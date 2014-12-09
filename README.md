@@ -24,7 +24,7 @@ func main() {
     pending, err := s.ListenAndServe()
 
     fmt.Print(err) // will be nil if close has been triggered
-    <-pending      // wait for pending requests
+    <-pending      // wait for pending requests (channel will be closed)
 }
 ```
 

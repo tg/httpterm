@@ -36,8 +36,11 @@ var ErrClosing = errors.New("server closing")
 // An additional value of StateHead will be passed to the function on top of
 // the regular http.ConnState values.
 type Server struct {
-	// Original http.Server
 	http.Server
+
+	// CloseOnSignal enables server shutdown on SIGTERM/SIGNINT.
+	// Signal handler is registered in Serve() method.
+	CloseOnSignal bool
 
 	// HeadReadTimeout defines timeout for reading request headers.
 	HeadReadTimeout time.Duration
@@ -49,16 +52,11 @@ type Server struct {
 	// IdleTimeout defines for how long connection can be idle between requests.
 	IdleTimeout time.Duration
 
-	// NewAsActive controls whether new connection can be idle before issuing
-	// a request. By default, new connections will have IdleTimeout allowing for
-	// idle period before issuing a request. However, if this flag is set, new
-	// connections will be treated as immediately expecting the request, thus
-	// HeadReadTimeout will be applied.
+	// NewAsActive prevents new connections from being idle before sending
+	// first request. If set, new connections will have HeadReadTimeout applied.
+	// If server is behind some proxy or a load balancer which maintains
+	// a permanent connection, setting up this flag is not recommended.
 	NewAsActive bool
-
-	// CloseOnSignal enables server shutdown on SIGTERM/SIGNINT.
-	// Signal handler is registered in Serve() method.
-	CloseOnSignal bool
 
 	listener *rtListener
 
@@ -72,6 +70,7 @@ type Server struct {
 
 // Serve behaves as http.Server.Serve.
 // See: http://golang.org/pkg/net/http/#Server.Serve
+//
 // Along with an error, pending channel is returned which will be closed once
 // all connections are closed or hijacked.
 func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
@@ -121,6 +120,7 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 
 // ListenAndServe behaves as http.Server.ListenAndServe.
 // See: http://golang.org/pkg/net/http/#Server.ListenAndServe
+//
 // Along with an error, pending channel is returned which will be closed once
 // all connections are closed or hijacked.
 func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
@@ -140,6 +140,7 @@ func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
 
 // ListenAndServeTLS behaves as http.Server.ListenAndServeTLS.
 // See: http://golang.org/pkg/net/http/#Server.ListenAndServeTLS
+//
 // Along with an error, pending channel is returned which will be closed once
 // all connections are closed or hijacked.
 func (s *Server) ListenAndServeTLS(certFile, keyFile string) (pending <-chan bool, err error) {
