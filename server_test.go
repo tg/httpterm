@@ -88,7 +88,7 @@ func TestNewConnectionIdleTimeout(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{})
+		s := Server{}
 		s.IdleTimeout = idleTimeout
 		s.HeadReadTimeout = idleTimeout / 100
 		s.Serve(l)
@@ -117,7 +117,7 @@ func TestNewConnectionRequestTimeout(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{})
+		var s Server
 		s.IdleTimeout = requestTimeout * 2
 		s.HeadReadTimeout = requestTimeout
 		s.Serve(l)
@@ -158,7 +158,8 @@ func TestNewConnectionBodyTimeout(t *testing.T) {
 		bodyread <- time.Since(start)
 	})
 
-	s := NewServer(&http.Server{Handler: handler})
+	var s Server
+	s.Handler = handler
 	s.BodyReadTimeout = time.Second
 	go func() {
 		s.Serve(l)
@@ -198,7 +199,7 @@ func TestIdleTimeoutAfterRequest(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{})
+		var s Server
 		s.IdleTimeout = idleTimeout
 		s.HeadReadTimeout = readTimeout
 		s.Serve(l)
@@ -239,7 +240,7 @@ func TestSecondRequestTimeout(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{})
+		var s Server
 		s.IdleTimeout = idleTimeout
 		s.HeadReadTimeout = readTimeout
 		s.Serve(l)
@@ -282,7 +283,7 @@ func TestNewAsActive(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		s := NewServer(&http.Server{})
+		var s Server
 		s.IdleTimeout = readTimeout * 2
 		s.HeadReadTimeout = readTimeout
 		s.NewAsActive = true
@@ -301,7 +302,8 @@ func TestNewAsActive(t *testing.T) {
 }
 
 func TestClose_empty(t *testing.T) {
-	s := NewServer(&http.Server{Addr: "127.0.0.1:0"})
+	var s Server
+	s.Addr = "127.0.0.1:0"
 
 	done := make(chan bool)
 
@@ -333,7 +335,7 @@ func TestClose_idle(t *testing.T) {
 
 	done := make(chan bool)
 
-	s := NewServer(&http.Server{})
+	var s Server
 	s.IdleTimeout = 5 * time.Second
 
 	go func() {
@@ -364,7 +366,8 @@ func TestClose_active(t *testing.T) {
 
 	done := make(chan bool)
 
-	s := NewServer(&http.Server{ReadTimeout: time.Second})
+	var s Server
+	s.ReadTimeout = time.Second
 	s.IdleTimeout = 5 * time.Second
 
 	go func() {
@@ -397,7 +400,8 @@ func TestClose_activeAfterClose(t *testing.T) {
 
 	done := make(chan bool)
 
-	s := NewServer(&http.Server{ReadTimeout: time.Second})
+	var s Server
+	s.ReadTimeout = time.Second
 	s.IdleTimeout = 5 * time.Second
 
 	go func() {
@@ -422,7 +426,8 @@ func TestClose_activeAfterClose(t *testing.T) {
 }
 
 func TestClose_signal(t *testing.T) {
-	s := NewServer(&http.Server{Addr: "127.0.0.1:0"})
+	var s Server
+	s.Addr = "127.0.0.1:0"
 	s.CloseOnSignal = true
 
 	done := make(chan bool)

@@ -2,6 +2,7 @@
 package httpterm
 
 import (
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -24,6 +25,9 @@ var ErrClosing = errors.New("server closing")
 
 // Server traps http.Server, exposes additional fuctionality
 type Server struct {
+	// Original http.Server
+	http.Server
+
 	// HeadReadTimeout defines timeout for reading request headers.
 	HeadReadTimeout time.Duration
 
@@ -45,7 +49,6 @@ type Server struct {
 	// Signal handler is registered in Serve() method.
 	CloseOnSignal bool
 
-	server   *http.Server // wrapped http server
 	listener *rtListener
 
 	lock    sync.Mutex
@@ -56,14 +59,14 @@ type Server struct {
 	conns map[net.Conn]bool
 }
 
-// NewServer wraps http.Server, which should be already configured.
-func NewServer(server *http.Server) *Server {
-	return &Server{server: server, conns: make(map[net.Conn]bool)}
-}
-
-// Serve behaves as http.Server.Serve on the wrapped server instance
+// Serve behaves as http.Server.Serve.
+// See: http://golang.org/pkg/net/http/#Server.Serve
+// Along with an error, pending channel is returned which will be closed once
+// all connections are closed or hijacked.
 func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
-	oldConnState := s.server.ConnState
+	s.conns = make(map[net.Conn]bool)
+
+	oldConnState := s.ConnState
 	newConnState := func(c net.Conn, state http.ConnState) {
 		s.updateConnState(c, state)
 		// Pass to original handler
@@ -72,7 +75,7 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 		}
 	}
 
-	s.server.ConnState = newConnState
+	s.ConnState = newConnState
 
 	// Wrap with custom listener
 	s.listener = &rtListener{
@@ -92,7 +95,7 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 	}
 
 	// Serve loop
-	err = s.server.Serve(s.listener)
+	err = s.Server.Serve(s.listener)
 
 	// Clear error if server closing
 	s.lock.Lock()
@@ -112,22 +115,58 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 	return
 }
 
-// ListenAndServe listens on the TCP network address from passed http.Server.Addr
-// and calls Serve(). Returned channel can be used to wait for pending requests
-// and will be closed once everything is handled.
+// ListenAndServe behaves as http.Server.ListenAndServe.
+// See: http://golang.org/pkg/net/http/#Server.ListenAndServe
+// Along with an error, pending channel is returned which will be closed once
+// all connections are closed or hijacked.
 func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
-	addr := s.server.Addr
+	addr := s.Addr
 	if addr == "" {
 		addr = ":http"
 	}
-	l, err := net.Listen("tcp", addr)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return s.Serve(l)
+	return s.Serve(ln)
 }
 
-// Close server
+// ListenAndServeTLS behaves as http.Server.ListenAndServeTLS.
+// See: http://golang.org/pkg/net/http/#Server.ListenAndServeTLS
+// Along with an error, pending channel is returned which will be closed once
+// all connections are closed or hijacked.
+func (s *Server) ListenAndServeTLS(certFile, keyFile string) (pending <-chan bool, err error) {
+	config := &tls.Config{}
+	if s.TLSConfig != nil {
+		*config = *s.TLSConfig
+	}
+	if config.NextProtos == nil {
+		config.NextProtos = []string{"http/1.1"}
+	}
+
+	config.Certificates = make([]tls.Certificate, 1)
+	config.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return
+	}
+
+	addr := s.Addr
+	if addr == "" {
+		addr = ":https"
+	}
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return
+	}
+
+	return s.Serve(tls.NewListener(ln, config))
+}
+
+// Close shutdowns the server by closing the listener, disabling keep alives
+// and applying a 100ms timeout to all idle connections. Timeouts for all connections
+// currently processing a request will be unafected. Call to Close will cause
+// Serve to quit. Subsequent calls to Close will return ErrClosing.
 func (s *Server) Close() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -140,7 +179,7 @@ func (s *Server) Close() error {
 		return err
 	}
 
-	s.server.SetKeepAlivesEnabled(false)
+	s.SetKeepAlivesEnabled(false)
 	s.closing = true
 
 	// Set a 100ms deadline for all inactive connections (new or idle).
