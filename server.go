@@ -14,16 +14,27 @@ import (
 )
 
 const (
-	// StateHead tells when initial request data (header) was received.
-	// This varies from http.StateActive, as the latter is issued after headers
-	// are parsed.
-	StateHead http.ConnState = 100 + iota
+	// StateHead represents a connection that has read 1 or more bytes of
+	// a request. Contrary to http.StateActive, the server.ConnState hook fires
+	// before processing the data (headers). Connections transition from
+	// StateHead to http.StateActive or http.Closed.
+	StateHead http.ConnState = -1
 )
 
 // ErrClosing indicating that operation is not allowed as server is closing
 var ErrClosing = errors.New("server closing")
 
-// Server traps http.Server, exposes additional fuctionality
+// Server embeds http.Server and provides additional functionality.
+// All the http.Server can be accessed directly and behaves as decribed in
+// the original docs at http://golang.org/pkg/net/http/#Server.
+//
+// Assigning non-zero ReadTimeout is not advised, as it doesn't work well
+// with better defined read timeout extensions provided by this class.
+//
+// ConnState function will be overwritten after call to Serve, but the original
+// value will be preserved internally and called as expected.
+// An additional value of StateHead will be passed to the function on top of
+// the regular http.ConnState values.
 type Server struct {
 	// Original http.Server
 	http.Server
