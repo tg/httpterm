@@ -446,3 +446,18 @@ func TestClose_signal(t *testing.T) {
 
 	<-done
 }
+
+func TestListenAndServe_pendingOnError(t *testing.T) {
+	var s Server
+	s.Addr = "1000.2000.3000.4000.5000" // invalid address
+
+	pending, err := s.ListenAndServe()
+	if pending == nil {
+		t.Fatal("pending channel is nil")
+	}
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	<-pending
+}

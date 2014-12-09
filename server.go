@@ -115,14 +115,7 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 	}
 	s.lock.Unlock()
 
-	// Wait for pending requests
-	waiter := make(chan bool)
-	pending = waiter
-	go func() {
-		s.listener.wg.Wait()
-		close(waiter)
-	}()
-
+	pending = s.monitorPending()
 	return
 }
 
@@ -131,14 +124,17 @@ func (s *Server) Serve(l net.Listener) (pending <-chan bool, err error) {
 // Along with an error, pending channel is returned which will be closed once
 // all connections are closed or hijacked.
 func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
+	pending = noPending
+
 	addr := s.Addr
 	if addr == "" {
 		addr = ":http"
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, err
+		return
 	}
+
 	return s.Serve(ln)
 }
 
@@ -147,6 +143,8 @@ func (s *Server) ListenAndServe() (pending <-chan bool, err error) {
 // Along with an error, pending channel is returned which will be closed once
 // all connections are closed or hijacked.
 func (s *Server) ListenAndServeTLS(certFile, keyFile string) (pending <-chan bool, err error) {
+	pending = noPending
+
 	config := &tls.Config{}
 	if s.TLSConfig != nil {
 		*config = *s.TLSConfig
@@ -204,6 +202,22 @@ func (s *Server) Close() error {
 	}
 
 	return nil
+}
+
+// Closed pending channel
+var noPending <-chan bool = func() chan bool {
+	ch := make(chan bool)
+	close(ch)
+	return ch
+}()
+
+func (s *Server) monitorPending() <-chan bool {
+	ch := make(chan bool)
+	go func() {
+		s.listener.wg.Wait()
+		close(ch)
+	}()
+	return ch
 }
 
 func (s *Server) getTimeout(state http.ConnState) (timeout time.Duration) {
