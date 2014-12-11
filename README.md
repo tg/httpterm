@@ -1,11 +1,9 @@
-# httpterm
+# httpterm [![GoDoc](https://godoc.org/github.com/tg/httpterm?status.svg)](https://godoc.org/github.com/tg/httpterm) [![Build Status](https://travis-ci.org/tg/httpterm.svg?branch=master)](https://travis-ci.org/tg/httpterm)
 
 Extension to Go `http.Server` allowing for:
 
 - Graceful shutdown
 - Fine-tuning read timeouts
-
-[![GoDoc](https://godoc.org/github.com/tg/httpterm?status.svg)](https://godoc.org/github.com/tg/httpterm)
 
 ## Examples
 Run default server (as would `http.ListenAndServe`), exit gracefully on signal:
