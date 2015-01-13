@@ -326,6 +326,19 @@ func TestClose_empty(t *testing.T) {
 	}
 }
 
+// Listener closing server on accept, but returing first connection
+// This will allow for testing new connection after server has closed
+type coaListener struct {
+	net.Listener
+	s *Server
+}
+
+func (l *coaListener) Accept() (c net.Conn, err error) {
+	c, err = l.Listener.Accept()
+	l.s.Close()
+	return
+}
+
 func TestClose_idle(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -336,15 +349,14 @@ func TestClose_idle(t *testing.T) {
 	done := make(chan bool)
 
 	var s Server
-	s.IdleTimeout = 5 * time.Second
+	s.IdleTimeout = 1 * time.Second
 
 	go func() {
-		pending, err := s.Serve(l)
+		pending, err := s.Serve(&coaListener{l, &s})
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
-		<-pending
-		done <- true
+		done <- <-pending
 	}()
 
 	c, err := net.Dial(l.Addr().Network(), l.Addr().String())
@@ -354,7 +366,12 @@ func TestClose_idle(t *testing.T) {
 	defer c.Close()
 
 	s.Close()
-	<-done
+
+	select {
+	case <-done:
+	case <-time.After(s.IdleTimeout + time.Second):
+		t.Fatal("test timeout")
+	}
 }
 
 func TestClose_active(t *testing.T) {
