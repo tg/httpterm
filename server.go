@@ -173,8 +173,11 @@ func (s *Server) ListenAndServeTLS(certFile, keyFile string) (pending <-chan boo
 	return s.Serve(tls.NewListener(ln, config))
 }
 
+// The following timeout will be applied to idle connections on server shutdown
+var waitOnClose = 100 * time.Millisecond
+
 // Close shutdowns the server by closing the listener, disabling keep alives
-// and applying a 100ms timeout to all idle connections. Timeouts for all connections
+// and applying a predefined timeout to all idle connections. Timeouts for all connections
 // currently processing a request will be unafected. Call to Close will cause
 // Serve to quit. Subsequent calls to Close will return ErrClosing.
 func (s *Server) Close() error {
@@ -192,10 +195,10 @@ func (s *Server) Close() error {
 	s.SetKeepAlivesEnabled(false)
 	s.closing = true
 
-	// Set a 100ms deadline for all inactive connections (new or idle).
+	// Set a predefined deadline for all inactive connections (new or idle).
 	// If during this period state changes to active, request will be processed
 	// with regular request timeout, otherwise connection will be closed.
-	deadline := time.Now().Add(100 * time.Millisecond)
+	deadline := time.Now().Add(waitOnClose)
 	for c, active := range s.conns {
 		if !active {
 			c.SetReadDeadline(deadline)
@@ -271,6 +274,8 @@ func (s *Server) updateConnState(c net.Conn, state http.ConnState) {
 		if t := s.getTimeout(state); t != 0 {
 			c.SetReadDeadline(time.Now().Add(t))
 		}
+	} else {
+		c.SetReadDeadline(time.Now().Add(waitOnClose))
 	}
 }
 
