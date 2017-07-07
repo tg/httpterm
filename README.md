@@ -1,3 +1,7 @@
+## DEPRECATED
+This package is deprecated since Go 1.8 contains relevant timeouts and graceful shutdown.
+Enjoy the standard library!
+
 # httpterm [![GoDoc](https://godoc.org/github.com/tg/httpterm?status.svg)](https://godoc.org/github.com/tg/httpterm) [![Build Status](https://travis-ci.org/tg/httpterm.svg?branch=master)](https://travis-ci.org/tg/httpterm)
 
 Extension to Go `http.Server` allowing for:
